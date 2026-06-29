@@ -1,0 +1,20 @@
+<%= form_with(model: todo_list, class: "space-y-2") do |form| %>
+  <% if todo_list.errors.any? %>
+    <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+      <%= todo_list.errors.full_messages.to_sentence %>
+    </div>
+  <% end %>
+
+  <div class="flex items-center gap-2">
+    <%= form.text_field :name,
+          placeholder: "Add todo list",
+          autocomplete: "off",
+          class: "flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none" %>
+    <%= form.submit (todo_list.persisted? ? "Save" : "+"),
+          class: "rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 cursor-pointer" %>
+    <% if todo_list.persisted? %>
+      <%= link_to "Cancel", todo_list_path(todo_list),
+            class: "rounded-lg px-3 py-2 text-sm text-slate-500 hover:bg-slate-100" %>
+    <% end %>
+  </div>
+<% end %>

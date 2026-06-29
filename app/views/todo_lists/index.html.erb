@@ -1,9 +1,34 @@
-<%= link_to 'Add Todo List', new_todo_list_path %>
+<div class="mb-8 text-center">
+  <h1 class="text-3xl font-bold tracking-tight text-slate-900">Todo List App</h1>
+</div>
 
-<div>
-  <% @todo_lists.each do |todo_list| %>
-    <div>
-      #<%= todo_list.id %> | <%= todo_list.name %>
+<div class="grid gap-10 md:grid-cols-2 items-start">
+  <%# Left pane: todo lists %>
+  <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-semibold text-slate-900">Todo Lists</h2>
     </div>
-  <% end %>
+
+    <%= turbo_frame_tag "new_todo_list" do %>
+      <%= render "form", todo_list: @new_todo_list %>
+    <% end %>
+
+    <div id="todo_lists" data-controller="selection" class="mt-4 flex flex-col gap-4">
+      <% @todo_lists.each do |todo_list| %>
+        <%= render todo_list, selected: todo_list == @todo_list %>
+      <% end %>
+      <%= render "empty", todo_lists: @todo_lists %>
+    </div>
+  </section>
+
+  <%# Right pane: todo items for the selected list %>
+  <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+    <%= turbo_frame_tag "todo_items_pane" do %>
+      <% if @todo_list %>
+        <%= render "todo_items/pane", todo_list: @todo_list %>
+      <% else %>
+        <%= render "todo_items/placeholder" %>
+      <% end %>
+    <% end %>
+  </section>
 </div>

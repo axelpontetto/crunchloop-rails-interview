@@ -1,0 +1,6 @@
+<%# Inline edit: swaps the list row (matching turbo frame) into an edit form. %>
+<%= turbo_frame_tag dom_id(@todo_list) do %>
+  <div class="rounded-lg border border-indigo-300 bg-indigo-50 p-3">
+    <%= render "form", todo_list: @todo_list %>
+  </div>
+<% end %>

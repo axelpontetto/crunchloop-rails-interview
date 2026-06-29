@@ -1,0 +1,11 @@
+<%= turbo_stream.remove dom_id(@todo_list) %>
+
+<%# Show the "no lists" message again once the last list is gone. %>
+<%= turbo_stream.replace "todo_lists_empty" do %>
+  <%= render "empty", todo_lists: @todo_lists %>
+<% end %>
+
+<%# Reset the right pane, since the shown items may belong to the deleted list. %>
+<%= turbo_stream.update "todo_items_pane" do %>
+  <%= render "todo_items/placeholder" %>
+<% end %>

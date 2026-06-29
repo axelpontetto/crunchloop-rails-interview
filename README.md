@@ -16,6 +16,15 @@ To run the TodoApi in your local environment:
 
 `bin/puma`
 
+## Run the web app
+
+The Hotwire + Tailwind web UI is served at `/`. Run it with the dev process
+(starts Rails and the Tailwind CSS watcher):
+
+`bin/dev`
+
+Then open http://localhost:3000.
+
 ## Test
 
 To run tests:

@@ -1,16 +1,21 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>RailsInterview</title>
+    <title>Todo List App</title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
+    <%= stylesheet_link_tag "tailwind", "data-turbo-track": "reload" %>
 
     <%= stylesheet_link_tag "application", "data-turbo-track": "reload" %>
     <%= javascript_importmap_tags %>
   </head>
 
-  <body>
-    <%= yield %>
+  <body class="bg-slate-100 min-h-screen text-slate-800">
+    <main class="max-w-5xl mx-auto px-4 py-10">
+      <%= yield %>
+    </main>
+
+    <%= render "shared/confirm_modal" %>
   </body>
 </html>

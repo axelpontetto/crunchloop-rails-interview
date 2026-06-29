@@ -1,0 +1,26 @@
+<%# Reusable confirmation modal. Wired to Turbo's confirm method (see
+    confirmation_controller.js), so any element with data-turbo-confirm uses it
+    instead of the browser's native confirm() dialog. %>
+<div data-controller="confirmation"
+     data-confirmation-target="modal"
+     data-action="keydown@window->confirmation#keydown"
+     class="hidden fixed inset-0 z-50 items-center justify-center p-4"
+     role="dialog" aria-modal="true">
+  <div data-action="click->confirmation#cancel" class="absolute inset-0 bg-slate-900/50"></div>
+
+  <div class="relative z-10 w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
+    <h3 class="text-base font-semibold text-slate-900">Are you sure?</h3>
+    <p data-confirmation-target="message" class="mt-1 text-sm text-slate-600"></p>
+
+    <div class="mt-5 flex justify-end gap-2">
+      <button type="button" data-action="confirmation#cancel"
+              class="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">
+        Cancel
+      </button>
+      <button type="button" data-action="confirmation#confirm" data-confirmation-target="confirmButton"
+              class="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">
+        Delete
+      </button>
+    </div>
+  </div>
+</div>

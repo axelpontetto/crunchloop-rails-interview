@@ -22,6 +22,9 @@ gem "turbo-rails"
 # Hotwire's modest JavaScript framework [https://stimulus.hotwired.dev]
 gem "stimulus-rails"
 
+# Use Tailwind CSS [https://github.com/rails/tailwindcss-rails]
+gem "tailwindcss-rails"
+
 # Build JSON APIs with ease [https://github.com/rails/jbuilder]
 gem "jbuilder"
 
@@ -39,6 +42,17 @@ gem "tzinfo-data", platforms: %i[ mingw mswin x64_mingw jruby ]
 
 # Reduces boot times through caching; required in config/boot.rb
 gem "bootsnap", require: false
+
+# Default gems extracted from Ruby's standard library that Rails 7.0 still
+# expects but newer Ruby versions no longer auto-require.
+gem "logger"
+gem "base64"
+gem "bigdecimal"
+gem "mutex_m"
+gem "drb"
+gem "benchmark"
+gem "ostruct"
+gem "cgi"
 
 # Use Sass to process CSS
 # gem "sassc-rails"

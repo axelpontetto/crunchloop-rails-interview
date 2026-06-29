@@ -1,0 +1,25 @@
+<% selected = local_assigns.fetch(:selected, false) %>
+<%= turbo_frame_tag dom_id(todo_list) do %>
+  <div data-selection-target="row"
+       class="group relative flex items-center gap-2 rounded-lg border px-3 py-2 transition
+              <%= selected ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50' %>">
+    <%= link_to todo_list.name,
+          todo_list_todo_items_path(todo_list),
+          data: { turbo_frame: "todo_items_pane", action: "click->selection#select" },
+          class: "flex-1 truncate font-medium text-slate-800 hover:text-indigo-600 after:absolute after:inset-0 after:content-['']" %>
+
+    <%= link_to edit_todo_list_path(todo_list),
+          class: "relative z-10 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700",
+          title: "Edit" do %>
+      <span aria-hidden="true">&#9998;</span>
+    <% end %>
+
+    <%= button_to todo_list_path(todo_list),
+          method: :delete,
+          class: "relative z-10 rounded p-1 text-slate-400 hover:bg-red-100 hover:text-red-600",
+          form: { data: { turbo_confirm: "Delete \"#{todo_list.name}\" and all its items?" } },
+          title: "Delete" do %>
+      <span aria-hidden="true">&#10005;</span>
+    <% end %>
+  </div>
+<% end %>

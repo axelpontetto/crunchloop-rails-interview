@@ -1,0 +1,4 @@
+<%# Loaded into the right pane when a list is selected (turbo frame navigation). %>
+<%= turbo_frame_tag "todo_items_pane" do %>
+  <%= render "todo_items/pane", todo_list: @todo_list %>
+<% end %>

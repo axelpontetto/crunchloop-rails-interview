@@ -1,0 +1,6 @@
+<%= turbo_stream.remove dom_id(@todo_item) %>
+
+<%# Show the "no items" message again once the last item is gone. %>
+<%= turbo_stream.replace "todo_items_empty" do %>
+  <%= render "todo_items/empty", todo_items: @todo_items %>
+<% end %>

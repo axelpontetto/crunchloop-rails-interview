@@ -1,0 +1,19 @@
+<%# Re-render the column with the new list selected (appended at the end via TodoList.all order). %>
+<%= turbo_stream.update "todo_lists" do %>
+  <% @todo_lists.each do |list| %>
+    <%= render list, selected: list == @todo_list %>
+  <% end %>
+  <%= render "empty", todo_lists: @todo_lists %>
+<% end %>
+
+<%# Reset the add form. %>
+<%= turbo_stream.replace "new_todo_list" do %>
+  <%= turbo_frame_tag "new_todo_list" do %>
+    <%= render "form", todo_list: TodoList.new %>
+  <% end %>
+<% end %>
+
+<%# Load the new list's (empty) items into the right pane. %>
+<%= turbo_stream.update "todo_items_pane" do %>
+  <%= render "todo_items/pane", todo_list: @todo_list %>
+<% end %>

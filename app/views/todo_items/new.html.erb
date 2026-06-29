@@ -1,0 +1,4 @@
+<%# Rendered on validation failure of an inline create; matches the frame in the pane. %>
+<%= turbo_frame_tag "new_todo_item" do %>
+  <%= render "form", todo_list: @todo_list, todo_item: @todo_item %>
+<% end %>

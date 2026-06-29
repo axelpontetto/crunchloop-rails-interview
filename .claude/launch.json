@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rails",
+      "runtimeExecutable": "bin/dev",
+      "runtimeArgs": [],
+      "port": 3000
+    },
+    {
+      "name": "verify",
+      "runtimeExecutable": "bin/rails",
+      "runtimeArgs": ["server", "-P", "tmp/pids/verify.pid"],
+      "port": 3100,
+      "autoPort": true
+    }
+  ]
+}

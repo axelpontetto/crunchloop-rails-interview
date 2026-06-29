@@ -1,0 +1,4 @@
+<%= turbo_stream.update "todo_items" do %>
+  <%= render partial: "todo_items/todo_item", collection: @todo_items, locals: { todo_list: @todo_list } %>
+  <%= render "todo_items/empty", todo_items: @todo_items %>
+<% end %>
