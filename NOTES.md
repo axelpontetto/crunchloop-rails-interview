@@ -57,6 +57,44 @@ curl -X POST http://localhost:3001/todolists \
 curl http://localhost:3001/todolists   # => the list you just created
 ```
 
+...and update/delete it, continuing with the same ids from the response above:
+
+```bash
+# Update the list's name
+curl -X PATCH http://localhost:3001/todolists/ext-2 \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "Renamed remote list"}'
+# => {"id":"ext-2","source_id":null,"name":"Renamed remote list","updated_at":"...","items":[{"id":"ext-1", ...}]}
+
+# Update an item's description/completion
+curl -X PATCH http://localhost:3001/todolists/ext-2/todoitems/ext-1 \
+  -H 'Content-Type: application/json' \
+  -d '{"description": "buy wholegrain bread", "completed": true}'
+# => {"id":"ext-1","source_id":null,"description":"buy wholegrain bread","completed":true,"updated_at":"..."}
+
+# Delete the item (use -i to see the status; DELETE responses have no body)
+curl -i -X DELETE http://localhost:3001/todolists/ext-2/todoitems/ext-1
+# => HTTP/1.1 204 No Content
+
+# Delete the whole list (and any remaining items)
+curl -i -X DELETE http://localhost:3001/todolists/ext-2
+# => HTTP/1.1 204 No Content
+```
+
+Run `bin/rails sync:run` after any of these to see the reconciler pull the change
+into the local DB: `pulled_update=1` after a `PATCH` (list or item), `deleted_local=1`
+after a `DELETE` (list or item) — see `Sync::Applier`'s `pull_update_*`/`pull_delete_*`
+handlers.
+
+⚠️ **The fake API keeps its data in memory only.** Restarting it (killing and
+re-running `script/fake_external_todo_api.rb`, or restarting `bin/dev`) wipes its
+store back to empty. If you then run `bin/rails sync:run`, the reconciler sees an
+empty external snapshot and — because of the "the delete wins" rule (see
+Resilience & idempotency) — **pull-deletes every previously-synced local list and
+item** (the ones that had an `external_id`). This is a quirk of the in-memory
+stand-in, not of the sync logic: a real external API is expected to persist its
+data across restarts, so this scenario shouldn't arise against the real service.
+
 ### 2. Run the app (web server + Solid Queue worker + fake external API)
 
 `bin/dev` starts everything declared in `Procfile.dev` in one terminal: the
