@@ -24,30 +24,92 @@ a rake task (the POC) or an ActiveJob (`TodoSyncJob`) on Solid Queue.
 Everything works inside the dev container (`.devcontainer/`), whose
 `postCreateCommand` runs `bundle install && rake db:setup`.
 
+### 0. Setup
+
 ```bash
 bundle install
 bin/rails db:migrate         # sync columns/tables + Solid Queue tables
-
-# Point at the external API (defaults to http://localhost:3001)
-export EXTERNAL_TODO_API_URL=http://localhost:3001
-
-# POC — run one reconciliation inline and print the result (no worker needed):
-bin/rails sync:run
-
-# Queued path — start a Solid Queue worker, then enqueue (or let the recurring
-# schedule in config/recurring.yml fire every 5 minutes):
-bin/rails solid_queue:start   # or: foreman start -f Procfile.dev
-bin/rails sync:enqueue
-
-# Tests:
-bundle exec rspec
 ```
 
-**No external service handy?** A tiny in-memory stand-in is included:
+### 1. Have an external Todo API to sync against
+
+By default the client points at `http://localhost:3001`
+(`ExternalTodoApi::Configuration`, overridable with `EXTERNAL_TODO_API_URL`). If
+you don't have the real service handy, a tiny in-memory stand-in is included
+(`script/fake_external_todo_api.rb`) and already listens on that same default
+port — no env var needed. `bin/dev` (step 2) starts it for you automatically, so
+you normally don't need to run it by hand.
+
+Only set `EXTERNAL_TODO_API_URL` if you want to point at a real service running
+somewhere else, e.g. `EXTERNAL_TODO_API_URL=http://localhost:4000 bin/rails
+sync:run` — in that case, comment out (or remove) the `fake_external_api` line
+in `Procfile.dev` before running `bin/dev`, so you don't have an unused fake
+server sitting on `:3001`.
+
+You can poke at the fake API directly to see it behave like the real one:
 
 ```bash
-ruby script/fake_external_todo_api.rb   # listens on :3001
+curl -X POST http://localhost:3001/todolists \
+  -H 'Content-Type: application/json' \
+  -d '{"source_id": null, "name": "Remote list", "items": [{"source_id": null, "description": "buy bread", "completed": false}]}'
+# => {"id":"ext-2","source_id":null,"name":"Remote list","updated_at":"...","items":[{"id":"ext-1", ...}]}
+
+curl http://localhost:3001/todolists   # => the list you just created
+```
+
+### 2. Run the app (web server + Solid Queue worker + fake external API)
+
+`bin/dev` starts everything declared in `Procfile.dev` in one terminal: the
+Rails server, the Tailwind watcher, the Solid Queue worker, and the fake
+external Todo API:
+
+```bash
+bin/dev
+```
+
+Or start the pieces manually in separate terminals if you only need some of
+them (the worker is required for the queued path and the recurring schedule in
+`config/recurring.yml`, not for the inline POC below):
+
+```bash
+bin/rails server                        # web app on :3000
+bin/rails solid_queue:start             # worker + recurring scheduler, or: bin/jobs
+ruby script/fake_external_todo_api.rb   # fake external API on :3001 (skip if using a real service)
+```
+
+### 3. Run the sync
+
+**POC — inline, no worker needed.** Runs one reconciliation immediately and
+prints the result:
+
+```bash
 bin/rails sync:run
+# => Sync result: pulled_create=1
+```
+
+Run it again against the same state and nothing changes (idempotent):
+
+```bash
+bin/rails sync:run
+# => Sync result:
+```
+
+**Queued path — via the worker.** With `bin/rails solid_queue:start` (or
+`bin/dev`) running, enqueue a run:
+
+```bash
+bin/rails sync:enqueue
+# => Enqueued TodoSyncJob on the :sync queue.
+```
+
+The worker log will show `[Sync] ...` lines as it processes the job. Left
+running, the worker also fires `TodoSyncJob` automatically every 5 minutes via
+`config/recurring.yml` — no manual enqueue needed for continuous syncing.
+
+### Tests
+
+```bash
+bundle exec rspec
 ```
 
 ## Architecture
