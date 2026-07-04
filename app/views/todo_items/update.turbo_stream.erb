@@ -1,3 +1,7 @@
 <%= turbo_stream.replace dom_id(@todo_item) do %>
   <%= render "todo_items/todo_item", todo_item: @todo_item, todo_list: @todo_list %>
 <% end %>
+
+<%= turbo_stream.replace "todo_items_stats" do %>
+  <%= render "todo_items/stats", todo_list: @todo_list, items: @todo_list.todo_items.reload %>
+<% end %>

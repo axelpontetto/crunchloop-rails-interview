@@ -8,6 +8,12 @@
   <% end %>
 <% end %>
 
+<% items = @todo_list.todo_items.reload %>
+
 <%= turbo_stream.replace "todo_items_empty" do %>
-  <%= render "todo_items/empty", todo_items: @todo_list.todo_items.reload %>
+  <%= render "todo_items/empty", todo_items: items %>
+<% end %>
+
+<%= turbo_stream.replace "todo_items_stats" do %>
+  <%= render "todo_items/stats", todo_list: @todo_list, items: items %>
 <% end %>

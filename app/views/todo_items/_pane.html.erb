@@ -1,9 +1,11 @@
-<% items = todo_list.todo_items %>
+<% items = todo_list.todo_items.to_a %>
 <div>
   <div class="flex items-center justify-between mb-4">
     <h2 class="text-lg font-semibold text-slate-900">Todo Items</h2>
     <span class="truncate text-sm text-slate-400"><%= todo_list.name %></span>
   </div>
+
+  <%= render "todo_items/stats", todo_list: todo_list, items: items %>
 
   <div class="flex items-center gap-2 mb-4">
     <%= button_to "Check all",

@@ -2,3 +2,7 @@
   <%= render partial: "todo_items/todo_item", collection: @todo_items, locals: { todo_list: @todo_list } %>
   <%= render "todo_items/empty", todo_items: @todo_items %>
 <% end %>
+
+<%= turbo_stream.replace "todo_items_stats" do %>
+  <%= render "todo_items/stats", todo_list: @todo_list, items: @todo_items %>
+<% end %>
