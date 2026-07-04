@@ -1,0 +1,262 @@
+# Sync System — Design Notes
+
+Part 2 of the challenge: keep local `TodoList`/`TodoItem` records in sync with an
+external Todo API (see `docs/README.md` / `docs/external-api.yaml`), supporting
+create, update and delete in both directions, with resilience, minimal external
+calls, and clear logging.
+
+## Overview
+
+The sync is a **bidirectional reconciliation**: on each run it fetches the full
+external snapshot, diffs it against the local state, and applies the minimal set
+of changes to converge the two sides.
+
+Conflicts are resolved with **last-write-wins (LWW)** on `updated_at`, gated by a
+value **dirty-check** (we only act when values actually differ). Deletes follow a
+**"the delete wins"** rule and are propagated using **tombstones** (local→external)
+and pull-deletes (external→local).
+
+The core is a plain Ruby service (`Sync::TodoSyncService`) so it can be driven by
+a rake task (the POC) or an ActiveJob (`TodoSyncJob`) on Solid Queue.
+
+## How to run
+
+Everything works inside the dev container (`.devcontainer/`), whose
+`postCreateCommand` runs `bundle install && rake db:setup`.
+
+```bash
+bundle install
+bin/rails db:migrate         # sync columns/tables + Solid Queue tables
+
+# Point at the external API (defaults to http://localhost:3001)
+export EXTERNAL_TODO_API_URL=http://localhost:3001
+
+# POC — run one reconciliation inline and print the result (no worker needed):
+bin/rails sync:run
+
+# Queued path — start a Solid Queue worker, then enqueue (or let the recurring
+# schedule in config/recurring.yml fire every 5 minutes):
+bin/rails solid_queue:start   # or: foreman start -f Procfile.dev
+bin/rails sync:enqueue
+
+# Tests:
+bundle exec rspec
+```
+
+**No external service handy?** A tiny in-memory stand-in is included:
+
+```bash
+ruby script/fake_external_todo_api.rb   # listens on :3001
+bin/rails sync:run
+```
+
+## Architecture
+
+The pieces are deliberately separated so the decision logic is pure and testable
+and all I/O is isolated:
+
+| Component | File | Responsibility |
+|---|---|---|
+| `ExternalTodoApi::Client` | `app/services/external_todo_api/client.rb` | Faraday wrapper, one method per endpoint |
+| `ExternalTodoApi::ResourceError` | `.../resource_error.rb` | non-2xx / transport error, knows `#retryable?` |
+| `Sync::Mapper` | `app/services/sync/mapper.rb` | field mapping, `source_id`, timestamp parsing, snapshot normalization |
+| `Sync::Reconciler` | `app/services/sync/reconciler.rb` | **pure** diff engine → list of `Action`s |
+| `Sync::Applier` | `app/services/sync/applier.rb` | executes actions (HTTP + AR), per-record retry |
+| `Sync::TodoSyncService` | `app/services/sync/todo_sync_service.rb` | orchestrates a run, returns `Sync::Result` |
+| `TodoSyncJob` | `app/jobs/todo_sync_job.rb` | ActiveJob wrapper (retries, concurrency) |
+
+Because `Reconciler` performs no I/O, the entire decision matrix is unit-tested
+without touching the network.
+
+## A sync run — and how few calls it makes
+
+`Sync::TodoSyncService#call` runs four phases:
+
+1. **Fetch** — a single `GET /todolists` returns the whole external state (lists
+   with nested items). This is the only read. A failed/partial fetch aborts the
+   run (see Resilience).
+2. **Index** — build lookup hashes for local and external records (in memory).
+3. **Reconcile** — the pure `Reconciler` produces the actions.
+4. **Apply** — the `Applier` performs only the necessary writes.
+
+External calls per run: `1 (GET) + new-lists (POST) + changed-records (PATCH) +
+tombstones (DELETE)`. Pull operations write locally only — **zero** external
+calls. A converged state costs exactly **1 call** (the GET) and zero mutations.
+
+## Data model & migrations
+
+- **Timestamps on `todo_lists`** — the table had none; LWW needs `updated_at` on
+  both sides (`db/migrate/*_add_timestamps_to_todo_lists.rb`).
+- **`external_id` + `last_synced_at`** on `todo_lists` and `todo_items` — the link
+  to the external record and the last successful reconciliation time.
+- **`sync_tombstones`** — a positive record that a previously-synced record was
+  deleted locally, so we can propagate the DELETE. `propagated_at` is set once the
+  external DELETE succeeds (idempotency).
+
+**Why a tombstone table instead of soft-delete?** A hard delete leaves no trace,
+so "missing locally" is ambiguous (deleted vs. never existed vs. local DB reset).
+A tombstone is the unambiguous "this was deleted" signal, and unlike a
+`deleted_at` + `default_scope` it doesn't touch the domain models or the existing
+specs (e.g. the `dependent: :destroy` test keeps passing). The tombstone is
+written by the `Syncable` concern (`app/models/concerns/syncable.rb`) on
+`after_destroy`, only when the record had an `external_id`.
+
+**Why no `origin` column?** With LWW, a record absent from a *complete* snapshot
+is treated as deleted, and `external_id` already distinguishes "never pushed"
+(no id → push-create) from "was synced, now gone" (has id → pull-delete). So an
+ownership flag isn't needed.
+
+## Reconciliation algorithm
+
+**Matching:** by `external_id` first; if absent, fall back to `source_id`
+(`"rails-<local_id>"`). The fallback repairs a link lost to a crash between the
+`POST` and saving the returned `external_id`, so we never create a duplicate.
+
+**Decision matrix** (lists; items are identical within a matched list):
+
+| Situation | Action |
+|---|---|
+| Local without `external_id`, no match | **push-create** (`POST`, items nested) |
+| Both match, values differ, local newer | **push-update** (`PATCH`) |
+| Both match, values differ, external newer | **pull-update** (update local) |
+| Both match, values equal | no-op |
+| External-only, born external (`source_id` not ours) | **pull-create** |
+| Local with `external_id`, absent from snapshot | **pull-delete** (delete wins) |
+| Pending tombstone | **push-delete** (delete wins) |
+| External claims to be ours but no local & no tombstone | **log inconsistency** |
+| New local item on an already-existing external list | **warn + skip** (API gap) |
+
+**LWW + dirty-check:** timestamps are parsed to UTC; the newer side wins, with a
+1-second epsilon breaking ties toward local. Crucially, we only act when the
+mapped values differ — this is what prevents ping-pong. After a pull we also copy
+the external `updated_at` onto the local row so the next run doesn't mistake it
+for "locally newer".
+
+## Field mapping & `source_id`
+
+- `TodoList.name` ↔ external `name`.
+- `TodoItem.title` ↔ external `description`; `TodoItem.complete` ↔ external `completed`.
+- When we push a record we stamp `source_id = "rails-<local_id>"`. This namespaced
+  value is our correlation key and lets us tell records that originated locally
+  from records born on the external side (whose `source_id` is null).
+
+## Deletes
+
+- **Local delete → external:** `after_destroy` writes a tombstone (if the record
+  had an `external_id`); the next run issues the `DELETE` and marks the tombstone
+  `propagated_at`. Deleting a whole list emits only a list tombstone — the
+  external `DELETE /todolists/:id` cascades to its items, so per-item tombstones
+  are skipped (via `destroyed_by_association`).
+- **External delete → local:** a synced record absent from a complete snapshot is
+  destroyed locally (with tombstone suppression, so we don't try to re-delete it).
+- **Delete vs. concurrent update — "the delete wins":** simpler and predictable,
+  avoids zombie records, and doesn't require a delete timestamp from the external
+  API (which it doesn't expose).
+
+## Resilience & idempotency
+
+- **Fetch is fatal on failure:** a failed GET propagates (nothing is applied), so
+  we never act on a partial snapshot — which would otherwise cause false deletes
+  or duplicate creates. A queued job retries the whole (idempotent) run later.
+- **Trusting the snapshot:** a successful GET is treated as the complete external
+  state (the API has no pagination), so deletes are propagated as-is. This
+  deliberately favours honoring real deletes over guarding against a (rare)
+  valid-but-wrong empty response; a count-based abort was rejected because it
+  would also block legitimate bulk deletes. The robust fix (deferred deletes with
+  a grace period, so transient glitches self-heal while real deletes still
+  propagate) is noted under Future work.
+- **Partial-failure isolation:** each action is applied independently; a failure
+  is recorded in `Sync::Result` and the run continues.
+- **Two-level retries:** the `Applier` retries transient failures per-record with
+  backoff (so we don't redo already-synced records); `TodoSyncJob` additionally
+  `retry_on` transient errors for the whole run and `discard_on Sync::Aborted`.
+- **Idempotent by construction:** `external_id`/`source_id` matching prevents
+  duplicates, `propagated_at` prevents double-deletes, and the value dirty-check
+  makes redundant writes no-ops. Re-running a converged state does nothing.
+- **Concurrency:** `TodoSyncJob` uses Solid Queue's `limits_concurrency key: "todo-sync", to: 1`
+  so runs don't overlap.
+- **Logging:** every decision is logged under the `[Sync]` tag, plus a final
+  summary (`Sync::Result#to_s`).
+
+## Performance
+
+One GET per run (full snapshot with nested items), batched creates via the nested
+`POST`, PATCH only on a real value diff, and pulls that cost no external calls.
+
+## Assumptions
+
+- The external API leaves `source_id` **null** for records created directly on it
+  (confirmed by the create-body schema; it's what lets us tell local- vs
+  external-born records apart).
+- `GET /todolists` returns the complete set (the current API has no pagination).
+- External `id`s are stable strings.
+
+## Limitations & trade-offs
+
+- **No standalone item creation on the external API.** There's no endpoint to add
+  an item to an *existing* external list (items can only be created nested in the
+  list `POST`). A new local item added to an already-synced list is logged and
+  skipped rather than doing a destructive list recreate. New items on a *new* list
+  sync fine (nested).
+- **LWW drops the losing edit** and is subject to clock skew between systems (the
+  epsilon mitigates ties, not genuine skew).
+- **"The delete wins"** can discard a very recent edit made on the other side.
+- **Solid Queue on SQLite** is fine for the POC but has concurrency limits; a
+  separate queue database is the production-grade option.
+
+## Scalability
+
+The single full-reconcile run is correct for the app's real dataset, but it pulls
+the entire external state each run — the bottleneck is the API contract
+(`GET /todolists`, no `?since=`/pagination → O(total) per run). Roughly: hundreds–
+low thousands are fine, tens of thousands get wasteful, millions are infeasible.
+
+Roadmap (requires API support in most cases):
+1. **Delta/incremental pull** (`updated_after`/changes feed) — the primary fix,
+   O(changes) instead of O(total).
+2. **Event-driven push** (`after_commit` → per-CRUD job) so the frequent path is
+   O(changes) and full-reconcile becomes an infrequent safety net. The decoupled
+   core makes this a drop-in addition.
+3. **Webhooks from the external API** — the pull-side equivalent: react to
+   created/updated/deleted events instead of polling. With (2), the whole sync
+   becomes event-driven and reconciliation is only a safety net.
+4. **Pagination/streaming**, **watermark cursor**, **sharding** with parallel
+   workers.
+
+Honest caveat: event-driven fixes the *push* side at scale; the *pull* side only
+scales with delta sync (1).
+
+## Decisions log
+
+- **Bidirectional LWW** over one-way/owner-wins: honors the full brief (create
+  local when detected in external + propagate local changes) without a heavy
+  conflict-resolution layer, thanks to the value dirty-check.
+- **Tombstone table** over soft-delete: non-invasive, keeps existing specs green.
+- **Faraday** over `Net::HTTP`: declarative setup, JSON middleware, first-class
+  with WebMock; all HTTP is hidden behind `ExternalTodoApi::Client`.
+- **Rails 7.1 + Solid Queue** on a single SQLite DB: modern durable jobs without
+  Redis; the sync core stays independent of the queue.
+- **Periodic reconciliation** as the backbone (event-driven documented as future
+  work).
+
+## Testing
+
+- `spec/services/sync/reconciler_spec.rb` — the full decision matrix, pure, no HTTP.
+- `spec/services/external_todo_api/client_spec.rb` — each endpoint + error handling
+  (500 retryable, 422 not, timeout, 404-on-delete), via WebMock.
+- `spec/services/sync/todo_sync_service_spec.rb` — integration: push-create,
+  pull-create, tombstone delete, **idempotency** (0 mutations), **partial failure**
+  isolation, and **GET-abort**.
+- `spec/jobs/todo_sync_job_spec.rb` — enqueue/perform + retry/discard config.
+- `spec/models/sync_tombstone_spec.rb` — tombstone creation rules (incl. cascade).
+
+All specs stub the external API with WebMock (`WebMock.disable_net_connect!`), so
+the suite never hits the network.
+
+## Future work
+
+Delta sync; event-driven push via `after_commit`; webhooks for real-time pull; a
+separate Solid Queue database; deferred deletes with a grace period (mark a
+record "missing since" and only delete it after it stays absent for N runs, so a
+transient empty snapshot self-heals while real deletes still propagate); and an
+optional "newest wins" rule for the delete-vs-update conflict.

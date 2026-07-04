@@ -4,9 +4,13 @@
 # or operating system, you probably want to add a global ignore instead:
 #   git config --global core.excludesfile '~/.gitignore_global'
 
-# Ignore SQLite3 databases
+# Ignore SQLite3 databases (and their WAL/SHM sidecars)
 rails_interview_development
 rails_interview_test
+*.sqlite3
+*.sqlite3-*
+*-shm
+*-wal
 
 # Ignore bundler config.
 /.bundle
