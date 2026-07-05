@@ -1,4 +1,4 @@
 web: bin/rails server
-css: bin/rails tailwindcss:watch
+css: bin/rails tailwindcss:watch[always]
 worker: bin/rails solid_queue:start
 fake_external_api: PORT=3001 ruby script/fake_external_todo_api.rb

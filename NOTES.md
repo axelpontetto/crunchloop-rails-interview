@@ -21,8 +21,26 @@ a rake task (the POC) or an ActiveJob (`TodoSyncJob`) on Solid Queue.
 
 ## How to run
 
-Everything works inside the dev container (`.devcontainer/`), whose
-`postCreateCommand` runs `bundle install && rake db:setup`.
+Everything works inside the dev container (`.devcontainer/`) — Ruby **3.3**
+(bumped from the original 3.1 to satisfy Rails 7.1's `>= 3.2.0` requirement),
+with `postCreateCommand` running `bundle install && bundle exec rake db:setup`.
+This has been verified end-to-end in an actual container (not just locally):
+`bundle exec rspec`, `bin/dev`, `bin/rails sync:run`, and the forwarded ports all
+confirmed working from a clean `devcontainer up`.
+
+### Dev container quick start
+
+```bash
+npm install -g @devcontainers/cli      # or use VS Code's "Dev Containers" extension
+devcontainer up --workspace-folder .
+devcontainer exec --workspace-folder . -- bash -lc "bundle exec rspec"
+devcontainer exec --workspace-folder . -- bash -lc "bin/dev"   # web + css + worker + fake API
+```
+
+With the container up, `http://localhost:3000` (the UI) and `http://localhost:3001`
+(the fake external API) are both reachable from the host — `devcontainer.json`
+forwards both ports. Equivalently, open the repo in VS Code and run
+**"Dev Containers: Reopen in Container"**, then use the integrated terminal.
 
 ### 0. Setup
 
@@ -46,38 +64,45 @@ sync:run` — in that case, comment out (or remove) the `fake_external_api` line
 in `Procfile.dev` before running `bin/dev`, so you don't have an unused fake
 server sitting on `:3001`.
 
-You can poke at the fake API directly to see it behave like the real one:
+You can poke at the fake API directly to see it behave like the real one. Its
+`id`s (`ext-1`, `ext-2`, ...) come from a counter that keeps incrementing for as
+long as the process runs, so **don't hardcode them** — capture the real `id`
+from each response instead (using `ruby -rjson`, always available in this
+project, rather than assuming `jq` is installed):
 
 ```bash
-curl -X POST http://localhost:3001/todolists \
+LIST_ID=$(curl -s -X POST http://localhost:3001/todolists \
   -H 'Content-Type: application/json' \
-  -d '{"source_id": null, "name": "Remote list", "items": [{"source_id": null, "description": "buy bread", "completed": false}]}'
-# => {"id":"ext-2","source_id":null,"name":"Remote list","updated_at":"...","items":[{"id":"ext-1", ...}]}
+  -d '{"source_id": null, "name": "Remote list", "items": [{"source_id": null, "description": "buy bread", "completed": false}]}' \
+  | ruby -rjson -e 'puts JSON.parse(STDIN.read)["id"]')
 
-curl http://localhost:3001/todolists   # => the list you just created
+ITEM_ID=$(curl -s http://localhost:3001/todolists \
+  | ruby -rjson -e 'puts JSON.parse(STDIN.read).find { |l| l["id"] == ARGV[0] }["items"].first["id"]' "$LIST_ID")
+
+echo "list=$LIST_ID item=$ITEM_ID"   # e.g. list=ext-2 item=ext-1 — but could be anything
 ```
 
-...and update/delete it, continuing with the same ids from the response above:
+...then update/delete using those variables:
 
 ```bash
 # Update the list's name
-curl -X PATCH http://localhost:3001/todolists/ext-2 \
+curl -X PATCH "http://localhost:3001/todolists/$LIST_ID" \
   -H 'Content-Type: application/json' \
   -d '{"name": "Renamed remote list"}'
-# => {"id":"ext-2","source_id":null,"name":"Renamed remote list","updated_at":"...","items":[{"id":"ext-1", ...}]}
+# => {"id":"...","source_id":null,"name":"Renamed remote list","updated_at":"...","items":[...]}
 
 # Update an item's description/completion
-curl -X PATCH http://localhost:3001/todolists/ext-2/todoitems/ext-1 \
+curl -X PATCH "http://localhost:3001/todolists/$LIST_ID/todoitems/$ITEM_ID" \
   -H 'Content-Type: application/json' \
   -d '{"description": "buy wholegrain bread", "completed": true}'
-# => {"id":"ext-1","source_id":null,"description":"buy wholegrain bread","completed":true,"updated_at":"..."}
+# => {"id":"...","source_id":null,"description":"buy wholegrain bread","completed":true,"updated_at":"..."}
 
 # Delete the item (use -i to see the status; DELETE responses have no body)
-curl -i -X DELETE http://localhost:3001/todolists/ext-2/todoitems/ext-1
+curl -i -X DELETE "http://localhost:3001/todolists/$LIST_ID/todoitems/$ITEM_ID"
 # => HTTP/1.1 204 No Content
 
 # Delete the whole list (and any remaining items)
-curl -i -X DELETE http://localhost:3001/todolists/ext-2
+curl -i -X DELETE "http://localhost:3001/todolists/$LIST_ID"
 # => HTTP/1.1 204 No Content
 ```
 
@@ -301,8 +326,9 @@ One GET per run (full snapshot with nested items), batched creates via the neste
 - **LWW drops the losing edit** and is subject to clock skew between systems (the
   epsilon mitigates ties, not genuine skew).
 - **"The delete wins"** can discard a very recent edit made on the other side.
-- **Solid Queue on SQLite** is fine for the POC but has concurrency limits; a
-  separate queue database is the production-grade option.
+- **Solid Queue on SQLite** needed a `busy_timeout` (see Decisions log) to survive
+  its dispatcher/worker/scheduler starting concurrently; fine for the POC's
+  scale, but a separate queue database is the production-grade option.
 
 ## Scalability
 
@@ -338,6 +364,17 @@ scales with delta sync (1).
   Redis; the sync core stays independent of the queue.
 - **Periodic reconciliation** as the backbone (event-driven documented as future
   work).
+- **`css: bin/rails tailwindcss:watch[always]`** in `Procfile.dev`, not the bare
+  task: Tailwind CSS v4's CLI auto-exits its watcher when `stdin` isn't a TTY
+  (the case under `foreman`/containers) — without `always`, `bin/dev` looked like
+  it silently died seconds after boot. Found by actually running `bin/dev`
+  inside the dev container, not just in an interactive terminal locally.
+- **`timeout: 5000` in `config/database.yml`**: Solid Queue runs its dispatcher,
+  worker and scheduler as separate OS processes against the same SQLite file;
+  without a busy-timeout, concurrent access at boot raised
+  `SQLite3::BusyException`. Rails' sqlite3 adapter maps `timeout:` directly to
+  `busy_timeout()`. Also only surfaced when testing in the dev container, where
+  all three processes cold-start at once.
 
 ## Testing
 

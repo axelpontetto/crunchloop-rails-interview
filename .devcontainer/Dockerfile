@@ -1,9 +1,9 @@
-# [Choice] Ruby version (use -bullseye variants on local arm64/Apple Silicon): 3, 3.1, 3.0, 2, 2.7, 2.6, 3-bullseye, 3.1-bullseye, 3.0-bullseye, 2-bullseye, 2.7-bullseye, 2.6-bullseye, 3-buster, 3.1-buster, 3.0-buster, 2-buster, 2.7-buster, 2.6-buster
-ARG VARIANT=3.1
+# [Choice] Ruby version (must satisfy Rails 7.1's >= 3.2.0 requirement): 3.3, 3.2, 3.3-bookworm, 3.2-bookworm
+ARG VARIANT=3.3
 FROM mcr.microsoft.com/devcontainers/ruby:${VARIANT}
 
-# Install Rails
-RUN gem install rails webdrivers
+# Rails itself is installed via `bundle install` (see postCreateCommand), which
+# resolves the exact version pinned in Gemfile.lock. No global gem install needed.
 
 # Default value to allow debug server to serve content over GitHub Codespace's port forwarding service
 # The value is a comma-separated list of allowed domains 

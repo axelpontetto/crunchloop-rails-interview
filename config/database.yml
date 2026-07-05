@@ -5,6 +5,10 @@ default: &default
   username: postgres
   password: postgres
   pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  # Solid Queue runs several OS processes (dispatcher/worker/scheduler) against
+  # this same SQLite file; without a busy timeout, concurrent writes raise
+  # SQLite3::BusyException instead of waiting briefly for the lock to clear.
+  timeout: 5000
 
 development:
   <<: *default

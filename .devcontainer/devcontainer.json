@@ -13,7 +13,8 @@
   "features": {},
 
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
-  "forwardPorts": [3000],
+  // 3000: Rails server. 3001: the fake external Todo API (script/fake_external_todo_api.rb).
+  "forwardPorts": [3000, 3001],
 
   // Use 'postCreateCommand' to run commands after the container is created.
   "postCreateCommand": "bundle install && bundle exec rake db:setup",
